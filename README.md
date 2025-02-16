@@ -15,3 +15,5 @@ npm install
 ```bash
 npm test
 ```
+
+3. **Open Webpage**: `src/assignment02.html`
