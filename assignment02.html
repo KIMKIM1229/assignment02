@@ -21,6 +21,13 @@
             font-weight: bold;
             color: goldenrod;
         }
+        #result-container {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -48,8 +55,6 @@
 <div id="result-container" style="display:none;"></div>
 
 <script>
-    // TypeScript 代碼轉換為 JavaScript
-    // 輸入 Type
     function splitBill(input) {
         const date = formatDate(input.date);
         const location = input.location;
@@ -57,8 +62,8 @@
         const tip = calculateTip(subTotal, input.tipPercentage);
         const totalAmount = subTotal + tip;
 
-        let items = calculateItems(input.items, input.tipPercentage);
-        adjustAmounts(totalAmount, items);
+        const items = calculateItems(input.items, input.tipPercentage); // 計算每個人的應付金額
+        adjustAmounts(totalAmount, items); // 調整金額以確保正確的總額
 
         return {
             date,
@@ -72,10 +77,7 @@
 
     function formatDate(date) {
         const parts = date.split("-");
-        let year = parseInt(parts[0]);
-        let month = parseInt(parts[1]);
-        let day = parseInt(parts[2]);
-        return `${year}年${month}月${day}日`;
+        return `${parts[0]}年${parseInt(parts[1])}月${parseInt(parts[2])}日`;
     }
 
     function calculateSubTotal(items) {
@@ -83,52 +85,71 @@
     }
 
     function calculateTip(subTotal, tipPercentage) {
-        const tipAmount = subTotal * (tipPercentage / 100);
-        return Math.round(tipAmount * 10) / 10;
+        return Math.round(subTotal * (tipPercentage / 100) * 10) / 10;
     }
 
     function scanPersons(items) {
-        const persons = new Set();
-        items.forEach((item) => {
-            if (!item.isShared && item.person) {
-                persons.add(item.person);
-            }
-        });
-        return Array.from(persons);
+    const persons = new Set();
+
+    // 掃描獨立付款人
+    items.forEach(item => {
+        if (item.person) {
+            persons.add(item.person);
+        }
+    });
+
+    // **新增：確保均分者也加入**
+    items.forEach(item => {
+        if (item.isShared && item.sharedBy) {  
+            item.sharedBy.forEach(person => persons.add(person));
+        }
+    });
+
+    return Array.from(persons);
+}
+
+function calculateItems(items, tipPercentage) {
+    const sharedItems = items.filter(item => item.isShared); // 獲取均分項目
+    const individualItems = items.filter(item => !item.isShared); // 獲取獨立付款的項目
+    
+    // **獲取所有有消費的人，包括參與均分的人**
+    let persons = new Set();
+
+    // 記錄獨立付款的人的名稱
+    individualItems.forEach(item => persons.add(item.person));
+
+    // **修正點**：如果有均分項目，也要確保均分的那個人會顯示出來
+    if (sharedItems.length > 0) {
+        persons.add("均分者");
     }
 
-    function calculateItems(items, tipPercentage) {
-        const names = scanPersons(items);
-        const persons = names.length;
+    persons = Array.from(persons); // 轉回陣列
 
-        return names.map((name) => ({
-            name,
-            amount: calculatePersonAmount({
-                items,
-                tipPercentage,
-                name,
-                persons,
-            }),
-        }));
-    }
+    // 計算均分金額
+    const sharedAmount = sharedItems.reduce((total, item) => total + item.price, 0);
+    const sharedAmountPerPerson = persons.length > 0 ? sharedAmount / persons.length : 0;
 
-    function calculatePersonAmount(input) {
-        let personalAmount = 0;
-        let sharedAmount = 0;
+    // **計算每個人應付金額**
+    const results = persons.map(person => {
+        // 計算個人點餐總金額
+        const personalAmount = individualItems
+            .filter(item => item.person === person)
+            .reduce((sum, item) => sum + item.price, 0);
 
-        input.items.forEach((item) => {
-            if (item.isShared) {
-                sharedAmount += item.price / input.persons;
-            } else if (item.person === input.name) {
-                personalAmount += item.price;
-            }
-        });
+        // 總金額 = 個人點餐 + 均分的金額
+        const totalAmount = personalAmount + sharedAmountPerPerson;
 
-        const totalAmount = personalAmount + sharedAmount;
-        const individualTip = (totalAmount * input.tipPercentage) / 100;
+        // 計算應付小費
+        const individualTip = (totalAmount * tipPercentage) / 100;
 
-        return parseFloat((totalAmount + individualTip).toFixed(1));
-    }
+        return {
+            name: person,
+            amount: parseFloat((totalAmount + individualTip).toFixed(1))
+        };
+    });
+
+    return results;
+}
 
     function adjustAmounts(totalAmount, items) {
         const currentTotal = items.reduce((sum, item) => sum + item.amount, 0);
@@ -136,10 +157,9 @@
 
         if (Math.abs(difference) < 0.01) return;
 
-        const roundedDifference = parseFloat(difference.toFixed(1));
-        const adjustmentPerPerson = roundedDifference / items.length;
+        const adjustmentPerPerson = difference / items.length;
 
-        items.forEach((item) => {
+        items.forEach(item => {
             item.amount = parseFloat((item.amount + adjustmentPerPerson).toFixed(1));
         });
 
@@ -157,12 +177,15 @@
                 <label>餐點名稱:
                     <input type="text" class="item-name" required />
                 </label>
+                
                 <label>價格（元）:
                     <input type="number" class="item-price" min="0" step="0.1" required />
                 </label>
+                
                 <label>是否均分:
-                    <input type="checkbox" class="is-shared" checked />
+                    <input type="checkbox" class="is-shared" />
                 </label>
+                
                 <label>付款人:
                     <input type="text" class="payer" placeholder="付款人名稱（僅對不均分項目有效）" />
                 </label>
@@ -191,19 +214,36 @@
     });
 
     function displayResults(output) {
-        const resultContainer = document.getElementById('result-container');
-        resultContainer.innerHTML = `
-            <h2>分帳結果</h2>
-            <p>日期：${output.date}</p>
-            <p>地點：${output.location}</p>
-            <p>小計：<span class="currency">$${output.subTotal.toFixed(1)}</span></p>
-            <p>小費：<span class="currency">$${output.tip.toFixed(1)}</span></p>
-            <p>總金額：<span class="currency">$${output.totalAmount.toFixed(1)}</span></p>
-            <h3>每人最終需支付金額</h3>
-            <ul>${output.items.map(item => `<li>${item.name}: <span class="currency">$${item.amount.toFixed(1)}</span></li>`).join('')}</ul>
-        `;
-        resultContainer.style.display = 'block';
-    }
+    const resultContainer = document.getElementById('result-container');
+
+    resultContainer.innerHTML = `
+        <h2>分帳結果</h2>
+        <p>日期：${output.date}</p>
+        <p>地點：${output.location}</p>
+        <p>小計：<span class="currency">$${output.subTotal.toFixed(1)}</span></p>
+        <p>小費：<span class="currency">$${output.tip.toFixed(1)}</span></p>
+        <p>總金額：<span class="currency">$${output.totalAmount.toFixed(1)}</span></p>
+        <h3>每人最終需支付金額</h3>
+        <table border="1" cellspacing="0" cellpadding="5">
+            <thead>
+                <tr>
+                    <th>姓名</th>
+                    <th>應付金額 (元)</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${output.items.map(item => `
+                    <tr>
+                        <td>${item.name}</td>
+                        <td class="currency">$${item.amount.toFixed(1)}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    resultContainer.style.display = 'block';
+}
+
 </script>
 </body>
 </html>
